@@ -1,56 +1,62 @@
 package com.example.demo;
 
-
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.listener.PatternTopic;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
+import org.springframework.data.redis.listener.adapter.MessageListenerAdapter;
 
 @SpringBootApplication
 public class SbaAdvancedDependencies1Application {
 
-  private static final Logger log = LoggerFactory.getLogger(SbaAdvancedDependencies1Application.class);
+	private static final Logger LOGGER = LoggerFactory.getLogger(SbaAdvancedDependencies1Application.class);
 
-  public static void main(String[] args) {
-    SpringApplication.run(SbaAdvancedDependencies1Application.class);
-  }
+	@Bean
+	RedisMessageListenerContainer container(RedisConnectionFactory connectionFactory,
+			MessageListenerAdapter listenerAdapter) {
 
-  @Bean
-  public CommandLineRunner demo(CustomerRepository repository) {
-    return (args) -> {
-      // save a few customers
-      repository.save(new Customer("Jack", "Bauer"));
-      repository.save(new Customer("Chloe", "O'Brian"));
-      repository.save(new Customer("Kim", "Bauer"));
-      repository.save(new Customer("David", "Palmer"));
-      repository.save(new Customer("Michelle", "Dessler"));
+		RedisMessageListenerContainer container = new RedisMessageListenerContainer();
+		container.setConnectionFactory(connectionFactory);
+		container.addMessageListener(listenerAdapter, new PatternTopic("chat"));
 
-      // fetch all customers
-      log.info("Customers found with findAll():");
-      log.info("-------------------------------");
-      repository.findAll().forEach(customer -> {
-        log.info(customer.toString());
-      });
-      log.info("");
+		return container;
+	}
 
-      // fetch an individual customer by ID
-      Customer customer = repository.findById(1L);
-      log.info("Customer found with findById(1L):");
-      log.info("--------------------------------");
-      log.info(customer.toString());
-      log.info("");
+	@Bean
+	MessageListenerAdapter listenerAdapter(MessageReceiver receiver) {
+		return new MessageListenerAdapter(receiver, "receiveMessage");
+	}
 
-      // fetch customers by last name
-      log.info("Customer found with findByLastName('Bauer'):");
-      log.info("--------------------------------------------");
-      repository.findByLastName("Bauer").forEach(bauer -> {
-        log.info(bauer.toString());
-      });
-      log.info("");
-    };
-  }
+	@Bean
+	MessageReceiver receiver() {
+		return new MessageReceiver();
+	}
 
+	@Bean
+	StringRedisTemplate template(RedisConnectionFactory connectionFactory) {
+		return new StringRedisTemplate(connectionFactory);
+	}
+
+	public static void main(String[] args) throws InterruptedException {
+
+		ApplicationContext ctx = SpringApplication.run(SbaAdvancedDependencies1Application.class, args);
+
+		StringRedisTemplate template = ctx.getBean(StringRedisTemplate.class);
+		MessageReceiver receiver = ctx.getBean(MessageReceiver.class);
+
+		while (receiver.getCount() == 0) {
+
+			LOGGER.info("Sending message...");
+			template.convertAndSend("chat", "Hello from Redis!");
+			Thread.sleep(500L);
+		}
+
+		System.exit(0);
+	}
 }
